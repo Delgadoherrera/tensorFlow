@@ -1,12 +1,11 @@
 import os
 import pickle
 import numpy as np
-from music21 import converter, instrument, note, chord
+from music21 import converter, instrument, note, chord,pitch,stream
 from keras.utils import to_categorical
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
 from keras.callbacks import ModelCheckpoint
-from music21 import stream
 
 # Lista para guardar las notas extraídas
 notes = []
@@ -156,46 +155,43 @@ def create_music(prediction_output):
     offset = 0
     output_notes = []
 
-    # Crear una nota o acorde para cada nota en la secuencia de salida
     for pattern in prediction_output:
-        if '.' in pattern:  # Si es un acorde
-            notes_in_chord = pattern.split('.')
-            notes = []
-            for current_note in notes_in_chord:
-                new_note = note.Note()
-                new_note.storedInstrument = instrument.Piano()
-                try:
-                    new_note.pitch.midi = int(current_note)
-                    new_note.duration.quarterLength = np.random.choice(
-                        [0.25, 0.5, 1.0])
-                    notes.append(new_note)
-                except ValueError:
-                    pass
-            chord_note = chord.Chord(notes)
-            chord_note.offset = offset
-            output_notes.append(chord_note)
-        elif pattern.isdigit():  # Si es una sola nota
-            new_note = note.Note()
-            new_note.storedInstrument = instrument.Piano()
-            try:
-                new_note.pitch.midi = int(pattern)
-                new_note.duration.quarterLength = np.random.choice(
-                    [0.25, 0.5, 1.0])
-                new_note.offset = offset
-                output_notes.append(new_note)
-            except ValueError:
-                pass
+        if pattern:  # Verifica que el patrón no esté vacío
+            if '.' in pattern:  # Si es un acorde
+                notes_in_chord = pattern.split('.')
+                notes = []
+                for current_note in notes_in_chord:
+                    try:
+                        p = pitch.Pitch(current_note)
+                        new_note = note.Note()
+                        new_note.pitch = p
+                        new_note.duration.quarterLength = np.random.choice([0.25, 0.5, 1.0])
+                        print(f"Nueva nota!: {new_note}: {notes_in_chord}")
 
-        # Avanzar la posición de la nota en el tiempo
+                        notes.append(new_note)
+                    except Exception as e:
+                        print(f"Error al convertir {current_note}: {e}")
+                if notes:  # Solo crea el acorde si hay notas válidas
+                    chord_note = chord.Chord(notes)
+                    chord_note.offset = offset
+                    output_notes.append(chord_note)
+            else:  # Si es una sola nota
+                try:
+                    p = pitch.Pitch(pattern)
+                    new_note = note.Note()
+                    new_note.pitch = p
+                    new_note.duration.quarterLength = np.random.choice([0.25, 0.5, 1.0])
+                    new_note.offset = offset
+                    output_notes.append(new_note)
+                except Exception as e:
+                    print(f"Error al convertir {pattern}: {e}")
+        else:
+            print("Patrón vacío encontrado, se omite")
+
         offset += np.random.choice([0.5, 1.0, 1.5, 2, 2.5, 3, 3.5, 4])
 
-    print('output notes', output_notes)
-    # Crear un objeto stream a partir de la lista de notas
     midi_stream = stream.Stream(output_notes)
-
-    # Exportar la secuencia de notas a un archivo MIDI
     midi_stream.write('midi', fp='output.mid')
-
 
 if __name__ == '__main__':
     # Especifica el directorio que contiene los archivos MIDI
