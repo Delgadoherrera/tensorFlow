@@ -151,46 +151,85 @@ def generate_music(model, network_input, int_to_note, n_vocab):
     return prediction_output
 
 
+def generate_music(model, network_input, int_to_note, n_vocab):
+    # Utilizar una semilla aleatoria de notas
+    np.random.seed(42)
+    sequence_length = 16
+
+    start = np.random.randint(0, len(network_input) - sequence_length)
+    pattern = network_input[start]
+    temperature = 1
+
+    # Generar 500 notas
+    prediction_output = []
+
+    for note_index in range(200):
+        prediction_input = np.reshape(pattern, (1, len(pattern), 1))
+        prediction_input = prediction_input / float(n_vocab)
+
+        # Predecir la siguiente nota utilizando el modelo
+        prediction = model.predict(prediction_input, verbose=0)
+
+        # Ajustar la distribución de probabilidad con la temperatura
+        prediction = np.log(prediction) / temperature
+        exp_prediction = np.exp(prediction)
+        prediction = exp_prediction / np.sum(exp_prediction)
+
+        # Muestrear la siguiente nota utilizando la distribución de probabilidad ajustada
+        index = np.random.choice(
+            range(n_vocab), size=1, p=prediction.flatten())[0]
+        result = int_to_note[index]
+        prediction_output.append(result)
+
+        # Agregar la nueva nota a la semilla y descartar la nota más antigua
+        pattern = np.append(pattern, index)
+        pattern = pattern[1:len(pattern)]
+
+    return prediction_output
+
+
 def create_music(prediction_output):
     offset = 0
     output_notes = []
 
+    # Crear una nota o acorde para cada nota en la secuencia de salida
     for pattern in prediction_output:
-        if pattern:  # Verifica que el patrón no esté vacío
-            if '.' in pattern:  # Si es un acorde
-                notes_in_chord = pattern.split('.')
-                notes = []
-                for current_note in notes_in_chord:
-                    try:
-                        p = pitch.Pitch(current_note)
-                        new_note = note.Note()
-                        new_note.pitch = p
-                        new_note.duration.quarterLength = np.random.choice([0.25, 0.5, 1.0])
-                        print(f"Nueva nota!: {new_note}: {notes_in_chord}")
-
-                        notes.append(new_note)
-                    except Exception as e:
-                        print(f"Error al convertir {current_note}: {e}")
-                if notes:  # Solo crea el acorde si hay notas válidas
-                    chord_note = chord.Chord(notes)
-                    chord_note.offset = offset
-                    output_notes.append(chord_note)
-            else:  # Si es una sola nota
+        if '.' in pattern:  # Si es un acorde
+            notes_in_chord = pattern.split('.')
+            notes = []
+            for current_note in notes_in_chord:
+                new_note = note.Note()
+                new_note.storedInstrument = instrument.Piano()
                 try:
-                    p = pitch.Pitch(pattern)
-                    new_note = note.Note()
-                    new_note.pitch = p
-                    new_note.duration.quarterLength = np.random.choice([0.25, 0.5, 1.0])
-                    new_note.offset = offset
-                    output_notes.append(new_note)
-                except Exception as e:
-                    print(f"Error al convertir {pattern}: {e}")
-        else:
-            print("Patrón vacío encontrado, se omite")
+                    new_note.pitch.midi = int(current_note)
+                    new_note.duration.quarterLength = np.random.choice(
+                        [0.25, 0.5, 1.0])
+                    notes.append(new_note)
+                except ValueError:
+                    pass
+            chord_note = chord.Chord(notes)
+            chord_note.offset = offset
+            output_notes.append(chord_note)
+        elif pattern.isdigit():  # Si es una sola nota
+            new_note = note.Note()
+            new_note.storedInstrument = instrument.Piano()
+            try:
+                new_note.pitch.midi = int(pattern)
+                new_note.duration.quarterLength = np.random.choice(
+                    [0.25, 0.5, 1.0])
+                new_note.offset = offset
+                output_notes.append(new_note)
+            except ValueError:
+                pass
 
+        # Avanzar la posición de la nota en el tiempo
         offset += np.random.choice([0.5, 1.0, 1.5, 2, 2.5, 3, 3.5, 4])
 
+    print('output notes', output_notes)
+    # Crear un objeto stream a partir de la lista de notas
     midi_stream = stream.Stream(output_notes)
+
+    # Exportar la secuencia de notas a un archivo MIDI
     midi_stream.write('midi', fp='output.mid')
 
 if __name__ == '__main__':
