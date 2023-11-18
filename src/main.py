@@ -57,7 +57,8 @@ def load_notes(directory):
 def prepare_sequences(notes):
     # Crear un diccionario que mapea notas a enteros
     pitchnames = sorted(set(item for item in notes))
-    note_to_int = dict((note, number) for number, note in enumerate(pitchnames))
+    note_to_int = dict((note, number)
+                       for number, note in enumerate(pitchnames))
     int_to_note = {number: note for note, number in note_to_int.items()}
 
     # Crear la secuencia de entrada y salida
@@ -82,7 +83,8 @@ def prepare_sequences(notes):
 def train(network_input, network_output, epochs):
     # Definir la arquitectura de la red neuronal
     model = Sequential()
-    model.add(LSTM(128, input_shape=(network_input.shape[1], network_input.shape[2]), return_sequences=True))
+    model.add(LSTM(128, input_shape=(
+        network_input.shape[1], network_input.shape[2]), return_sequences=True))
     model.add(Dropout(0.3))
     model.add(LSTM(128, return_sequences=True))
     model.add(Dropout(0.3))
@@ -93,15 +95,22 @@ def train(network_input, network_output, epochs):
 
     model.compile(loss='categorical_crossentropy', optimizer='adam')
 
-    # Definir el checkpoint para guardar los pesos de la mejor época
-    filepath = "weights.best.hdf5"
-    checkpoint = ModelCheckpoint(filepath, monitor='loss', verbose=0, save_best_only=True, mode='min')
+    # Comprobar si ya existe un archivo "weights.best.hdf5"
+    if os.path.exists("weights.best.hdf5"):
+        # Cargar los pesos desde el archivo existente
+        model.load_weights("weights.best.hdf5")
+        print("Cargando pesos existentes desde 'weights.best.hdf5'")
+    else:
+        # Definir el checkpoint para guardar los pesos de la mejor época
+        filepath = "weights.best.hdf5"
+        checkpoint = ModelCheckpoint(
+            filepath, monitor='loss', verbose=0, save_best_only=True, mode='min')
 
-    # Entrenar la red neuronal y guardar los pesos de la mejor época
-    model.fit(network_input, network_output, epochs=epochs, batch_size=350, callbacks=[checkpoint])
+        # Entrenar la red neuronal y guardar los pesos de la mejor época
+        model.fit(network_input, network_output, epochs=epochs,
+                  batch_size=350, callbacks=[checkpoint])
 
-    # Cargar los pesos de la mejor época
-    model.load_weights(filepath)
+        print("Entrenamiento completo. Pesos guardados en 'weights.best.hdf5'")
 
     return model
 
@@ -131,7 +140,8 @@ def generate_music(model, network_input, int_to_note, n_vocab):
         prediction = exp_prediction / np.sum(exp_prediction)
 
         # Muestrear la siguiente nota utilizando la distribución de probabilidad ajustada
-        index = np.random.choice(range(n_vocab), size=1, p=prediction.flatten())[0]
+        index = np.random.choice(
+            range(n_vocab), size=1, p=prediction.flatten())[0]
         result = int_to_note[index]
         prediction_output.append(result)
 
@@ -156,7 +166,8 @@ def create_music(prediction_output):
                 new_note.storedInstrument = instrument.Piano()
                 try:
                     new_note.pitch.midi = int(current_note)
-                    new_note.duration.quarterLength = np.random.choice([0.25, 0.5, 1.0])
+                    new_note.duration.quarterLength = np.random.choice(
+                        [0.25, 0.5, 1.0])
                     notes.append(new_note)
                 except ValueError:
                     pass
@@ -168,7 +179,8 @@ def create_music(prediction_output):
             new_note.storedInstrument = instrument.Piano()
             try:
                 new_note.pitch.midi = int(pattern)
-                new_note.duration.quarterLength = np.random.choice([0.25, 0.5, 1.0])
+                new_note.duration.quarterLength = np.random.choice(
+                    [0.25, 0.5, 1.0])
                 new_note.offset = offset
                 output_notes.append(new_note)
             except ValueError:
@@ -187,7 +199,7 @@ def create_music(prediction_output):
 
 if __name__ == '__main__':
     # Especifica el directorio que contiene los archivos MIDI
-    midi_directory = "C:/Users/southAtoms/Desktop/desarrollo/IAMidi/src/assets/midiFiles"
+    midi_directory = "/home/southatoms/Desktop/developLinux/tensorFlow/src/assets/midiFiles"
 
     # Cargar las notas del archivo "notes" (o crearlo a partir del archivo MIDI si no existe)
     notes = load_notes(midi_directory)
@@ -203,7 +215,8 @@ if __name__ == '__main__':
     model = train(network_input, network_output, epochs)
 
     # Generar música utilizando el modelo
-    prediction_output = generate_music(model, network_input, int_to_note, n_vocab)
+    prediction_output = generate_music(
+        model, network_input, int_to_note, n_vocab)
 
     # Crear música y exportarla a un archivo MIDI
     create_music(prediction_output)
