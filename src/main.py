@@ -25,7 +25,8 @@ def get_files(directory):
         notes_to_parse = None
         parts = instrument.partitionByInstrument(midi)
 
-        if parts:  # si hay partes de instrumentos
+        # Verificar si hay partes de instrumentos y que no estén vacías
+        if parts and parts.parts:
             notes_to_parse = parts.parts[0].recurse().notesAndRests
         else:
             notes_to_parse = midi.flat.notesAndRests
@@ -35,6 +36,7 @@ def get_files(directory):
                 notes.append(str(element.pitch))
             elif isinstance(element, chord.Chord):
                 notes.append('.'.join(str(n) for n in element.normalOrder))
+    print('notes', notes)
 
     return notes
 
@@ -189,48 +191,55 @@ def generate_music(model, network_input, int_to_note, n_vocab):
 
 
 def create_music(prediction_output):
-    offset = 0
+    offset = 0  # Inicializar el offset para la primera nota
     output_notes = []
 
-    # Crear una nota o acorde para cada nota en la secuencia de salida
-    for pattern in prediction_output:
-        if '.' in pattern:  # Si es un acorde
+    # Iterar sobre cada elemento en la secuencia generada
+    for i, pattern in enumerate(prediction_output):
+        # Si el patrón es un acorde (indicado por la presencia de '.')
+        if '.' in pattern:
             notes_in_chord = pattern.split('.')
             notes = []
             for current_note in notes_in_chord:
                 new_note = note.Note()
                 new_note.storedInstrument = instrument.Piano()
                 try:
-                    new_note.pitch.midi = int(current_note)
-                    new_note.duration.quarterLength = np.random.choice(
-                        [0.25, 0.5, 1.0])
+                    new_note.pitch.midi = int(current_note) + 60  # Transponer la nota 5 octavas arriba
                     notes.append(new_note)
                 except ValueError:
                     pass
-            chord_note = chord.Chord(notes)
-            chord_note.offset = offset
-            output_notes.append(chord_note)
-        elif pattern.isdigit():  # Si es una sola nota
+            new_chord = chord.Chord(notes)
+            new_chord.offset = offset
+            output_notes.append(new_chord)
+        elif pattern.isdigit():  # Si el patrón es una nota individual
             new_note = note.Note()
             new_note.storedInstrument = instrument.Piano()
             try:
-                new_note.pitch.midi = int(pattern)
-                new_note.duration.quarterLength = np.random.choice(
-                    [0.25, 0.5, 1.0])
+                new_note.pitch.midi = int(pattern) + 60  # Transponer la nota 5 octavas arriba
                 new_note.offset = offset
                 output_notes.append(new_note)
             except ValueError:
                 pass
 
-        # Avanzar la posición de la nota en el tiempo
-        offset += np.random.choice([0.5, 1.0, 1.5, 2, 2.5, 3, 3.5, 4])
+        # Calcular el offset para la siguiente nota
+        if i < len(prediction_output) - 1:
+            next_offset = offset + np.random.choice([0.5, 1.0, 1.5, 2, 2.5, 3, 3.5, 4])
+            duration = next_offset - offset
+        else:
+            duration = 1.0  # Duración por defecto para la última nota
 
-    print('output notes', output_notes)
-    # Crear un objeto stream a partir de la lista de notas
+        # Asignar la duración a la nota o acorde actual
+        if output_notes:
+            output_notes[-1].duration.quarterLength = duration
+
+        offset = next_offset if i < len(prediction_output) - 1 else offset + duration
+
+    # Crear un objeto stream con todas las notas y acordes
     midi_stream = stream.Stream(output_notes)
 
-    # Exportar la secuencia de notas a un archivo MIDI
+    # Escribir el stream en un archivo MIDI
     midi_stream.write('midi', fp='output.mid')
+
 
 if __name__ == '__main__':
     # Especifica el directorio que contiene los archivos MIDI
