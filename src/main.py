@@ -258,7 +258,7 @@ def adjust_notes_to_key(midi_file_path, adjusted_midi_file_path):
     # Definir la escala de La menor natural
     la_minor_scale = scale.MinorScale('A')
 
-    # Obtener las notas de la escala de La menor (sin repetir nombres de notas)
+    # Obtener las notas de la escala de La menor
     scale_notes = [p.name for p in la_minor_scale.getPitches('A2', 'A4')]
 
     # Función para encontrar la nota más cercana en la escala
@@ -272,45 +272,64 @@ def adjust_notes_to_key(midi_file_path, adjusted_midi_file_path):
                 closest_pitch = scale_pitch
         return closest_pitch
 
+    # Función para comparar dos acordes
+    def are_chords_equal(chord1, chord2):
+        if len(chord1.pitches) != len(chord2.pitches):
+            return False
+        return all(c1.midi == c2.midi for c1, c2 in zip(chord1.pitches, chord2.pitches))
+
+    last_chord = None  # Guardar el último acorde procesado
+
+    # Crear una nueva lista para elementos procesados
+    processed_elements = []
+
     # Procesar todas las notas y acordes en todas las partes
     for element in midi_data.recurse():
         if isinstance(element, note.Note):
             if element.name not in scale_notes:
                 closest_pitch = closest_scale_pitch(element.pitch)
                 element.pitch = closest_pitch
+            processed_elements.append(element)
         elif isinstance(element, chord.Chord):
-            new_chord_pitches = []
-            for chord_note in element.pitches:
-                if chord_note.name not in scale_notes:
-                    closest_pitch = closest_scale_pitch(chord_note)
-                    new_chord_pitches.append(closest_pitch)
-                else:
-                    new_chord_pitches.append(chord_note)
+            new_chord_pitches = [closest_scale_pitch(chord_note) if chord_note.name not in scale_notes else chord_note for chord_note in element.pitches]
             new_chord = chord.Chord(new_chord_pitches)
-            element.pitches = new_chord.pitches
+            
+            # Verificar si el nuevo acorde es diferente del último acorde procesado
+            if last_chord is None or not are_chords_equal(new_chord, last_chord):
+                processed_elements.append(new_chord)
+                last_chord = new_chord
+
+    # Crear un nuevo flujo de música y añadir los elementos procesados
+    new_midi_data = midi_data.cloneEmpty()
+    for element in processed_elements:
+        new_midi_data.append(element)
 
     # Guardar el archivo MIDI ajustado
-    midi_data.write('midi', fp=adjusted_midi_file_path)
+    new_midi_data.write('midi', fp=adjusted_midi_file_path)
+
+
+
+
 if __name__ == '__main__':
     # Especifica el directorio que contiene los archivos MIDI
     midi_directory = "/home/southatoms/Desktop/developLinux/tensorFlow/src/assets/midiFiles"
 
     # Cargar las notas del archivo "notes" (o crearlo a partir del archivo MIDI si no existe)
-    notes = load_notes(midi_directory)
+    #notes = load_notes(midi_directory)
 
     # Obtener el número de notas diferentes en el archivo MIDI
-    n_vocab = len(set(notes))
+    #n_vocab = len(set(notes))
 
     # Preprocesar las notas y crear las secuencias de entrada y salida de la red neuronal
-    network_input, network_output, int_to_note = prepare_sequences(notes)
+    #network_input, network_output, int_to_note = prepare_sequences(notes)
 
     # Entrenar la red neuronal
-    epochs = 2  # Número de épocas que quieres entrenar
-    model = train(network_input, network_output, epochs)
+    #epochs = 2  # Número de épocas que quieres entrenar
+    #model = train(network_input, network_output, epochs)
 
     # Generar música utilizando el modelo
-    prediction_output = generate_music(
-        model, network_input, int_to_note, n_vocab)
+    #prediction_output = generate_music(
+     #   model, network_input, int_to_note, n_vocab)
 
     # Crear música y exportarla a un archivo MIDI
     #create_music(prediction_output)
