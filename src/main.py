@@ -1,7 +1,7 @@
 import os
 import pickle
 import numpy as np
-from music21 import converter, instrument, note, chord,pitch,stream,interval,scale
+from music21 import converter, instrument, note, chord, pitch, stream, interval, scale
 from keras.utils import to_categorical
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
@@ -204,7 +204,8 @@ def create_music(prediction_output):
                 new_note = note.Note()
                 new_note.storedInstrument = instrument.Piano()
                 try:
-                    new_note.pitch.midi = int(current_note) + 60  # Transponer la nota 5 octavas arriba
+                    # Transponer la nota 5 octavas arriba
+                    new_note.pitch.midi = int(current_note) + 60
                     notes.append(new_note)
                 except ValueError:
                     pass
@@ -215,7 +216,8 @@ def create_music(prediction_output):
             new_note = note.Note()
             new_note.storedInstrument = instrument.Piano()
             try:
-                new_note.pitch.midi = int(pattern) + 60  # Transponer la nota 5 octavas arriba
+                # Transponer la nota 5 octavas arriba
+                new_note.pitch.midi = int(pattern) + 60
                 new_note.offset = offset
                 output_notes.append(new_note)
             except ValueError:
@@ -223,7 +225,8 @@ def create_music(prediction_output):
 
         # Calcular el offset para la siguiente nota
         if i < len(prediction_output) - 1:
-            next_offset = offset + np.random.choice([0.5, 1.0, 1.5, 2, 2.5, 3, 3.5, 4])
+            next_offset = offset + \
+                np.random.choice([0.5, 1.0, 1.5, 2, 2.5, 3, 3.5, 4])
             duration = next_offset - offset
         else:
             duration = 1.0  # Duración por defecto para la última nota
@@ -232,7 +235,8 @@ def create_music(prediction_output):
         if output_notes:
             output_notes[-1].duration.quarterLength = duration
 
-        offset = next_offset if i < len(prediction_output) - 1 else offset + duration
+        offset = next_offset if i < len(
+            prediction_output) - 1 else offset + duration
 
     # Crear un objeto stream con todas las notas y acordes
     midi_stream = stream.Stream(output_notes)
@@ -247,9 +251,10 @@ def determine_key_from_midi(midi_file_path):
 
     # Analizar la tonalidad utilizando music21
     key = midi_data.analyze('key')
-    
+
     # Retornar la tonalidad como una cadena de texto
     return key.tonic.name + " " + key.mode
+
 
 def adjust_notes_to_key(midi_file_path, adjusted_midi_file_path):
     # Cargar el archivo MIDI
@@ -291,9 +296,10 @@ def adjust_notes_to_key(midi_file_path, adjusted_midi_file_path):
                 element.pitch = closest_pitch
             processed_elements.append(element)
         elif isinstance(element, chord.Chord):
-            new_chord_pitches = [closest_scale_pitch(chord_note) if chord_note.name not in scale_notes else chord_note for chord_note in element.pitches]
+            new_chord_pitches = [closest_scale_pitch(
+                chord_note) if chord_note.name not in scale_notes else chord_note for chord_note in element.pitches]
             new_chord = chord.Chord(new_chord_pitches)
-            
+
             # Verificar si el nuevo acorde es diferente del último acorde procesado
             if last_chord is None or not are_chords_equal(new_chord, last_chord):
                 processed_elements.append(new_chord)
@@ -308,32 +314,31 @@ def adjust_notes_to_key(midi_file_path, adjusted_midi_file_path):
     new_midi_data.write('midi', fp=adjusted_midi_file_path)
 
 
-
-
 if __name__ == '__main__':
     # Especifica el directorio que contiene los archivos MIDI
     midi_directory = "/home/southatoms/Desktop/developLinux/tensorFlow/src/assets/midiFiles"
 
     # Cargar las notas del archivo "notes" (o crearlo a partir del archivo MIDI si no existe)
-    #notes = load_notes(midi_directory)
+    notes = load_notes(midi_directory)
 
     # Obtener el número de notas diferentes en el archivo MIDI
-    #n_vocab = len(set(notes))
+    n_vocab = len(set(notes))
 
     # Preprocesar las notas y crear las secuencias de entrada y salida de la red neuronal
-    #network_input, network_output, int_to_note = prepare_sequences(notes)
+    network_input, network_output, int_to_note = prepare_sequences(notes)
 
     # Entrenar la red neuronal
-    #epochs = 2  # Número de épocas que quieres entrenar
-    #model = train(network_input, network_output, epochs)
+    epochs = 10  # Número de épocas que quieres entrenar
+    model = train(network_input, network_output, epochs)
 
     # Generar música utilizando el modelo
-    #prediction_output = generate_music(
-     #   model, network_input, int_to_note, n_vocab)
+    prediction_output = generate_music(
+        model, network_input, int_to_note, n_vocab)
 
     # Crear música y exportarla a un archivo MIDI
-    #create_music(prediction_output)
-    midi_file_path = 'output.mid'  # Asegúrate de reemplazar esto con la ruta correcta a tu archivo MIDI
+    create_music(prediction_output)
+    # Asegúrate de reemplazar esto con la ruta correcta a tu archivo MIDI
+    midi_file_path = 'output.mid'
     key = determine_key_from_midi(midi_file_path)
     adjusted_midi_file_path = 'adjusted_output.mid'  # Ruta al archivo MIDI ajustado
     print("La tonalidad del archivo MIDI es:", key)
