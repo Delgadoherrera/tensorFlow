@@ -1,7 +1,7 @@
 import os
 import pickle
 import numpy as np
-from music21 import converter, instrument, note, chord,pitch,stream
+from music21 import converter, instrument, note, chord,pitch,stream,interval,scale
 from keras.utils import to_categorical
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
@@ -241,6 +241,56 @@ def create_music(prediction_output):
     midi_stream.write('midi', fp='output.mid')
 
 
+def determine_key_from_midi(midi_file_path):
+    # Cargar el archivo MIDI
+    midi_data = converter.parse(midi_file_path)
+
+    # Analizar la tonalidad utilizando music21
+    key = midi_data.analyze('key')
+    
+    # Retornar la tonalidad como una cadena de texto
+    return key.tonic.name + " " + key.mode
+
+def adjust_notes_to_key(midi_file_path, adjusted_midi_file_path):
+    # Cargar el archivo MIDI
+    midi_data = converter.parse(midi_file_path)
+
+    # Definir la escala de La menor natural
+    la_minor_scale = scale.MinorScale('A')
+
+    # Obtener las notas de la escala de La menor (sin repetir nombres de notas)
+    scale_notes = [p.name for p in la_minor_scale.getPitches('A2', 'A4')]
+
+    # Función para encontrar la nota más cercana en la escala
+    def closest_scale_pitch(note_pitch):
+        min_distance = float('inf')
+        closest_pitch = None
+        for scale_pitch in la_minor_scale.getPitches('A0', 'C8'):
+            distance = abs(scale_pitch.midi - note_pitch.midi)
+            if distance < min_distance:
+                min_distance = distance
+                closest_pitch = scale_pitch
+        return closest_pitch
+
+    # Procesar todas las notas y acordes en todas las partes
+    for element in midi_data.recurse():
+        if isinstance(element, note.Note):
+            if element.name not in scale_notes:
+                closest_pitch = closest_scale_pitch(element.pitch)
+                element.pitch = closest_pitch
+        elif isinstance(element, chord.Chord):
+            new_chord_pitches = []
+            for chord_note in element.pitches:
+                if chord_note.name not in scale_notes:
+                    closest_pitch = closest_scale_pitch(chord_note)
+                    new_chord_pitches.append(closest_pitch)
+                else:
+                    new_chord_pitches.append(chord_note)
+            new_chord = chord.Chord(new_chord_pitches)
+            element.pitches = new_chord.pitches
+
+    # Guardar el archivo MIDI ajustado
+    midi_data.write('midi', fp=adjusted_midi_file_path)
 if __name__ == '__main__':
     # Especifica el directorio que contiene los archivos MIDI
     midi_directory = "/home/southatoms/Desktop/developLinux/tensorFlow/src/assets/midiFiles"
@@ -263,4 +313,10 @@ if __name__ == '__main__':
         model, network_input, int_to_note, n_vocab)
 
     # Crear música y exportarla a un archivo MIDI
-    create_music(prediction_output)
+    #create_music(prediction_output)
+    midi_file_path = 'output.mid'  # Asegúrate de reemplazar esto con la ruta correcta a tu archivo MIDI
+    key = determine_key_from_midi(midi_file_path)
+    adjusted_midi_file_path = 'adjusted_output.mid'  # Ruta al archivo MIDI ajustado
+    print("La tonalidad del archivo MIDI es:", key)
+    adjust_notes_to_key(midi_file_path, adjusted_midi_file_path)
+    print("Archivo MIDI ajustado guardado en:", adjusted_midi_file_path)
