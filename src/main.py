@@ -1,20 +1,21 @@
 import os
 import pickle
 import numpy as np
-from music21 import converter, instrument, note, chord, pitch, stream, interval, scale
+from music21 import converter, instrument, note, chord, pitch, stream, interval, scale, duration
 from keras.utils import to_categorical
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
 from keras.callbacks import ModelCheckpoint
+from itertools import product
 
 # Lista para guardar las notas extraídas
 notes = []
+notes_durations = []
 
 
 def get_files(directory):
-    global notes
-    notes = []
-
+    global notes_durations
+    notes_durations = []
     midi_files = [f for f in os.listdir(directory) if f.endswith('.mid')]
 
     for midi_file in midi_files:
@@ -29,55 +30,65 @@ def get_files(directory):
             notes_to_parse = midi.flat.notesAndRests
 
         for element in notes_to_parse:
-            if isinstance(element, chord.Chord):
-                notes.append('.'.join(str(n) for n in element.normalOrder))
+            duration_value = element.duration.quarterLength
+            if isinstance(element, note.Note):
+                notes_durations.append(
+                    (str(element.pitch), float(duration_value)))
+            elif isinstance(element, chord.Chord):
+                notes_durations.append(
+                    ('.'.join(str(n) for n in element.normalOrder), float(duration_value)))
+            elif element.isRest:
+                notes_durations.append(('rest', float(duration_value)))
 
-    print('notes', notes)
-    return notes
-
-
+    # print('notes_durations', notes_durations)
+    return notes_durations
 
 # Función para cargar las notas desde un archivo "notes" previamente guardado
-def load_notes(directory):
-    # Intentar abrir el archivo "notes"
-    try:
-        with open("notes", "rb") as filepath:
-            notes = pickle.load(filepath)
-    # Si el archivo no existe, crearlo a partir del archivo MIDI
-    except FileNotFoundError:
-        notes = get_files(directory)
-    print('notesLoaded', notes)
-    return notes
 
+
+def load_notes(directory):
+    try:
+        with open("notes_durations", "rb") as filepath:
+            notes_durations = pickle.load(filepath)
+    except FileNotFoundError:
+        notes_durations = get_files(directory)
+    # print('notesDurationsLoaded', notes_durations)
+    return notes_durations
 
 # Obtener el número de notas diferentes en el archivo MIDI
-def prepare_sequences(notes):
-    # Crear un diccionario que mapea notas a enteros
-    pitchnames = sorted(set(item for item in notes))
-    note_to_int = dict((note, number)
-                       for number, note in enumerate(pitchnames))
-    int_to_note = {number: note for note, number in note_to_int.items()}
 
-    # Crear la secuencia de entrada y salida
+
+def prepare_sequences(notes_durations, note_to_int, duration_to_int):
     sequence_length = 16
     network_input = []
     network_output = []
-    for i in range(0, len(notes) - sequence_length, 1):
-        sequence_in = notes[i:i + sequence_length]
-        sequence_out = notes[i + sequence_length: i + sequence_length + 1]
-        network_input.append([note_to_int[char] for char in sequence_in])
-        network_output.append(note_to_int[sequence_out[0]])
 
-    # Convertir las secuencias de entrada y salida en arrays numpy y normalizar los valores
+    for i in range(0, len(notes_durations) - sequence_length, 1):
+        sequence_in = notes_durations[i:i + sequence_length]
+        sequence_out = notes_durations[i + sequence_length]
+
+        # Combinar la nota y la duración en un solo valor
+        input_val = [note_to_int[note] + len(note_to_int) * duration_to_int[duration]
+                     for note, duration in sequence_in]
+        output_val = note_to_int[sequence_out[0]] + \
+            len(note_to_int) * duration_to_int[sequence_out[1]]
+
+        network_input.append(input_val)
+        network_output.append(output_val)
+
     n_patterns = len(network_input)
     network_input = np.reshape(network_input, (n_patterns, sequence_length, 1))
-    network_input = network_input / float(len(pitchnames))
-    network_output = to_categorical(np.array(network_output))
 
-    return network_input, network_output, int_to_note
+    # Normalizar entrada y convertir salida a categórica
+    normalized_input = network_input / \
+        float(len(note_to_int) * len(duration_to_int))
+    network_output = to_categorical(
+        network_output, num_classes=len(note_to_int) * len(duration_to_int))
+
+    return normalized_input, network_output
 
 
-def train(network_input, network_output, epochs):
+def train(network_input, network_output, note_to_int, duration_to_int, epochs):
     # Definir la arquitectura de la red neuronal
     model = Sequential()
     model.add(LSTM(128, input_shape=(
@@ -88,7 +99,7 @@ def train(network_input, network_output, epochs):
     model.add(LSTM(128))
     model.add(Dense(32))
     model.add(Dropout(0.3))
-    model.add(Dense(network_output.shape[1], activation='softmax'))
+    model.add(Dense(len(note_to_int) * len(duration_to_int), activation='softmax'))
 
     model.compile(loss='categorical_crossentropy', optimizer='adam')
 
@@ -116,6 +127,7 @@ def generate_music(model, network_input, int_to_note, n_vocab):
     # Utilizar una semilla aleatoria de notas
     np.random.seed(42)
     sequence_length = 16
+    print("Longitud de network_input:", len(network_input))
 
     start = np.random.randint(0, len(network_input) - sequence_length)
     pattern = network_input[start]
@@ -130,6 +142,7 @@ def generate_music(model, network_input, int_to_note, n_vocab):
 
         # Predecir la siguiente nota utilizando el modelo
         prediction = model.predict(prediction_input, verbose=0)
+        print("Predicción:", prediction)
 
         # Ajustar la distribución de probabilidad con la temperatura
         prediction = np.log(prediction) / temperature
@@ -139,8 +152,13 @@ def generate_music(model, network_input, int_to_note, n_vocab):
         # Muestrear la siguiente nota utilizando la distribución de probabilidad ajustada
         index = np.random.choice(
             range(n_vocab), size=1, p=prediction.flatten())[0]
-        result = int_to_note[index]
-        prediction_output.append(result)
+        if index in int_to_note:
+            result = int_to_note[index]
+            prediction_output.append(result)
+            print('prediction_output:', prediction_output)
+
+        else:
+            print("network_input es demasiado corto para generar música.")
 
         # Agregar la nueva nota a la semilla y descartar la nota más antigua
         pattern = np.append(pattern, index)
@@ -152,7 +170,7 @@ def generate_music(model, network_input, int_to_note, n_vocab):
 def generate_music(model, network_input, int_to_note, n_vocab):
     # Utilizar una semilla aleatoria de notas
     np.random.seed(42)
-    sequence_length = 16
+    sequence_length = 8
 
     start = np.random.randint(0, len(network_input) - sequence_length)
     pattern = network_input[start]
@@ -187,31 +205,29 @@ def generate_music(model, network_input, int_to_note, n_vocab):
 
 
 def create_music(prediction_output):
-    offset = 0
-    output_notes = []
-    durations = [0.5 * i for i in range(1, 33)]
+    midi_stream = stream.Stream()
 
-    for pattern in prediction_output:
-        # Aquí solo procesamos patrones de acordes
-        if '.' in pattern:
+    for pattern, dur in prediction_output:
+        # Crear nota o acorde basado en el patrón
+        if '.' in pattern or pattern.isdigit():
+            # Es un acorde
             notes_in_chord = pattern.split('.')
-            notes = []
+            chord_notes = []
             for current_note in notes_in_chord:
-                new_note = note.Note()
+                new_note = note.Note(int(current_note))
                 new_note.storedInstrument = instrument.Piano()
-                try:
-                    new_note.pitch.midi = int(current_note) + 60
-                    notes.append(new_note)
-                except ValueError:
-                    pass
-            new_chord = chord.Chord(notes)
-            new_chord.offset = offset
-            output_notes.append(new_chord)
+                chord_notes.append(new_note)
+            new_chord = chord.Chord(
+                chord_notes, duration=duration.Duration(dur))
+            midi_stream.append(new_chord)
+        else:
+            # Es una nota
+            new_note = note.Note(pattern, duration=duration.Duration(dur))
+            new_note.storedInstrument = instrument.Piano()
+            midi_stream.append(new_note)
 
-            duration = np.random.choice(durations)
-            offset += duration
+    print("Contenido del stream:", midi_stream.show('text'))
 
-    midi_stream = stream.Stream(output_notes)
     midi_stream.write('midi', fp='output.mid')
 
 
@@ -288,18 +304,30 @@ if __name__ == '__main__':
     # Especifica el directorio que contiene los archivos MIDI
     midi_directory = "/home/southatoms/Desktop/developLinux/tensorFlow/src/assets/midiFiles"
 
-    # Cargar las notas del archivo "notes" (o crearlo a partir del archivo MIDI si no existe)
-    notes = load_notes(midi_directory)
+    # Cargar las notas y duraciones del archivo "notes" (o crearlo a partir del archivo MIDI si no existe)
+    notes_durations = load_notes(midi_directory)
+
+    # Crear diccionarios para mapear notas y duraciones a enteros
+    pitchnames = sorted(set(note for note, duration in notes_durations))
+    durations = sorted(set(duration for note, duration in notes_durations))
+    note_to_int = dict((note, number)
+                       for number, note in enumerate(pitchnames))
+    duration_to_int = dict((duration, number)
+                           for number, duration in enumerate(durations))
+    int_to_note = {i: (note, duration) for i, (note, duration)
+                   in enumerate(product(pitchnames, durations))}
 
     # Obtener el número de notas diferentes en el archivo MIDI
-    n_vocab = len(set(notes))
+    n_vocab = len(note_to_int) * len(duration_to_int)
 
-    # Preprocesar las notas y crear las secuencias de entrada y salida de la red neuronal
-    network_input, network_output, int_to_note = prepare_sequences(notes)
+    # Preprocesar las notas y duraciones y crear las secuencias de entrada y salida de la red neuronal
+    network_input, network_output = prepare_sequences(
+        notes_durations, note_to_int, duration_to_int)
 
     # Entrenar la red neuronal
     epochs = 10  # Número de épocas que quieres entrenar
-    model = train(network_input, network_output, epochs)
+    model = train(network_input, network_output,
+                  note_to_int, duration_to_int, epochs)
 
     # Generar música utilizando el modelo
     prediction_output = generate_music(
