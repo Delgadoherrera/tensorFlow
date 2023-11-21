@@ -123,48 +123,6 @@ def train(network_input, network_output, note_to_int, duration_to_int, epochs):
     return model
 
 
-def generate_music(model, network_input, int_to_note, n_vocab):
-    # Utilizar una semilla aleatoria de notas
-    np.random.seed(42)
-    sequence_length = 16
-    print("Longitud de network_input:", len(network_input))
-
-    start = np.random.randint(0, len(network_input) - sequence_length)
-    pattern = network_input[start]
-    temperature = 1
-
-    # Generar 500 notas
-    prediction_output = []
-
-    for note_index in range(200):
-        prediction_input = np.reshape(pattern, (1, len(pattern), 1))
-        prediction_input = prediction_input / float(n_vocab)
-
-        # Predecir la siguiente nota utilizando el modelo
-        prediction = model.predict(prediction_input, verbose=0)
-        print("Predicción:", prediction)
-
-        # Ajustar la distribución de probabilidad con la temperatura
-        prediction = np.log(prediction) / temperature
-        exp_prediction = np.exp(prediction)
-        prediction = exp_prediction / np.sum(exp_prediction)
-
-        # Muestrear la siguiente nota utilizando la distribución de probabilidad ajustada
-        index = np.random.choice(
-            range(n_vocab), size=1, p=prediction.flatten())[0]
-        if index in int_to_note:
-            result = int_to_note[index]
-            prediction_output.append(result)
-            print('prediction_output:', prediction_output)
-
-        else:
-            print("network_input es demasiado corto para generar música.")
-
-        # Agregar la nueva nota a la semilla y descartar la nota más antigua
-        pattern = np.append(pattern, index)
-        pattern = pattern[1:len(pattern)]
-
-    return prediction_output
 
 
 def generate_music(model, network_input, int_to_note, n_vocab):
@@ -174,7 +132,7 @@ def generate_music(model, network_input, int_to_note, n_vocab):
 
     start = np.random.randint(0, len(network_input) - sequence_length)
     pattern = network_input[start]
-    temperature = 1
+    temperature = 1.8
 
     # Generar 500 notas
     prediction_output = []
@@ -246,30 +204,29 @@ def adjust_notes_to_key(midi_file_path, adjusted_midi_file_path):
     # Cargar el archivo MIDI
     midi_data = converter.parse(midi_file_path)
 
-    # Definir la escala de La menor natural
-    la_minor_scale = scale.MinorScale('A')
+    # Analizar la tonalidad del archivo MIDI
+    key = midi_data.analyze('key')
+    print("Tonalidad analizada:", key)
 
-    # Obtener las notas de la escala de La menor
-    scale_notes = [p.name for p in la_minor_scale.getPitches('A2', 'A4')]
+    # Crear la escala basada en la tonalidad y modo analizados
+    if key.mode == 'major':
+        scale_key = scale.MajorScale(key.tonic.name)
+    else:
+        scale_key = scale.MinorScale(key.tonic.name)
+
+    # Obtener las notas de la escala
+    scale_notes = [p.name for p in scale_key.getPitches()]
 
     # Función para encontrar la nota más cercana en la escala
-    def closest_scale_pitch(note_pitch):
+    def closest_scale_pitch(note_pitch, scale_key):
         min_distance = float('inf')
         closest_pitch = None
-        for scale_pitch in la_minor_scale.getPitches('A0', 'C8'):
+        for scale_pitch in scale_key.getPitches('A0', 'C8'):
             distance = abs(scale_pitch.midi - note_pitch.midi)
             if distance < min_distance:
                 min_distance = distance
                 closest_pitch = scale_pitch
         return closest_pitch
-
-    # Función para comparar dos acordes
-    def are_chords_equal(chord1, chord2):
-        if len(chord1.pitches) != len(chord2.pitches):
-            return False
-        return all(c1.midi == c2.midi for c1, c2 in zip(chord1.pitches, chord2.pitches))
-
-    last_chord = None  # Guardar el último acorde procesado
 
     # Crear una nueva lista para elementos procesados
     processed_elements = []
@@ -277,19 +234,17 @@ def adjust_notes_to_key(midi_file_path, adjusted_midi_file_path):
     # Procesar todas las notas y acordes en todas las partes
     for element in midi_data.recurse():
         if isinstance(element, note.Note):
+            # Ajustar notas
             if element.name not in scale_notes:
-                closest_pitch = closest_scale_pitch(element.pitch)
+                closest_pitch = closest_scale_pitch(element.pitch, scale_key)
                 element.pitch = closest_pitch
             processed_elements.append(element)
         elif isinstance(element, chord.Chord):
+            # Ajustar acordes
             new_chord_pitches = [closest_scale_pitch(
-                chord_note) if chord_note.name not in scale_notes else chord_note for chord_note in element.pitches]
+                chord_note, scale_key) if chord_note.name not in scale_notes else chord_note for chord_note in element.pitches]
             new_chord = chord.Chord(new_chord_pitches)
-
-            # Verificar si el nuevo acorde es diferente del último acorde procesado
-            if last_chord is None or not are_chords_equal(new_chord, last_chord):
-                processed_elements.append(new_chord)
-                last_chord = new_chord
+            processed_elements.append(new_chord)
 
     # Crear un nuevo flujo de música y añadir los elementos procesados
     new_midi_data = midi_data.cloneEmpty()
@@ -325,7 +280,7 @@ if __name__ == '__main__':
         notes_durations, note_to_int, duration_to_int)
 
     # Entrenar la red neuronal
-    epochs = 10  # Número de épocas que quieres entrenar
+    epochs = 5  # Número de épocas que quieres entrenar
     model = train(network_input, network_output,
                   note_to_int, duration_to_int, epochs)
 
@@ -342,3 +297,4 @@ if __name__ == '__main__':
     print("La tonalidad del archivo MIDI es:", key)
     adjust_notes_to_key(midi_file_path, adjusted_midi_file_path)
     print("Archivo MIDI ajustado guardado en:", adjusted_midi_file_path)
+ 
