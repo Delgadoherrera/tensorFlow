@@ -7,10 +7,15 @@ from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
 from keras.callbacks import ModelCheckpoint
 from itertools import product
+from keras.layers import Input
+from keras.models import Model
+from keras.optimizers import Adam
 
 # Lista para guardar las notas extraídas
 notes = []
 notes_durations = []
+
+
 
 
 def get_files(directory):
@@ -93,6 +98,67 @@ def prepare_sequences(notes_durations, note_to_int, duration_to_int, tempo_to_in
 
     return normalized_input, network_output
 
+
+def build_generator():
+    model = Sequential()
+    model.add(LSTM(256, input_shape=(100, 1), return_sequences=True))
+    model.add(Dropout(0.3))
+    model.add(LSTM(256))
+    model.add(Dense(len(note_to_int) * len(duration_to_int) * len(tempo_to_int), activation='softmax'))
+    return model
+
+# Función para construir el discriminador
+def build_discriminator(sequence_length):
+    model = Sequential()
+    model.add(LSTM(256, input_shape=(sequence_length, 1), return_sequences=True))
+    model.add(Dropout(0.3))
+    model.add(LSTM(256))
+    model.add(Dense(1, activation='sigmoid'))
+    return model
+
+# Función para entrenar GAN
+def train_gan(generator, discriminator, gan, network_input, network_output, epochs=50, batch_size=128):
+    sequence_length = network_input.shape[1]
+
+    for epoch in range(epochs):
+        # ---------------------
+        #  Entrenar Discriminador
+        # ---------------------
+
+        # Seleccionar un lote aleatorio de secuencias musicales
+        idx = np.random.randint(0, network_input.shape[0], batch_size)
+        real_sequences = network_input[idx]
+
+        # Generar un lote de nuevas secuencias musicales
+        noise = np.random.normal(0, 1, (batch_size, 100, 1))
+        generated_sequences = generator.predict(noise)
+
+        # Asegurarse de que las secuencias generadas tengan la forma adecuada
+        if generated_sequences.shape[1] != sequence_length:
+            continue  # Saltar esta iteración si la longitud no coincide
+
+        # Crear etiquetas para datos reales y generados
+        real_y = np.ones((batch_size, 1))
+        fake_y = np.zeros((batch_size, 1))
+
+        # Entrenar el discriminador (reales clasificados como 1 y generados como 0)
+        d_loss_real = discriminator.train_on_batch(real_sequences, real_y)
+        d_loss_fake = discriminator.train_on_batch(generated_sequences, fake_y)
+        d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+
+        # ---------------------
+        #  Entrenar Generador
+        # ---------------------
+
+        # Entrenar el generador (intentando que el discriminador clasifique las secuencias generadas como reales)
+        g_loss = gan.train_on_batch(noise, real_y)
+
+        # Mostrar progreso
+        print(f"Epoch {epoch + 1}/{epochs} [D loss: {d_loss[0]}, acc: {d_loss[1]}] [G loss: {g_loss}]")
+
+    # Guardar los modelos entrenados
+    generator.save('gan_generator.h5')
+    discriminator.save('gan_discriminator.h5')
 
 def train(network_input, network_output, note_to_int, duration_to_int, epochs):
     # Definir la arquitectura de la red neuronal
@@ -277,34 +343,49 @@ if __name__ == '__main__':
 
     # Crear diccionarios para mapear notas, duraciones y tempos a enteros
     pitchnames = sorted(set(note for note, duration, tempo in notes_durations))
-    durations = sorted(
-        set(duration for note, duration, tempo in notes_durations))
+    durations = sorted(set(duration for note, duration, tempo in notes_durations))
     tempos = sorted(set(tempo for note, duration, tempo in notes_durations))
 
-    note_to_int = dict((note, number)
-                       for number, note in enumerate(pitchnames))
-    duration_to_int = dict((duration, number)
-                           for number, duration in enumerate(durations))
+    note_to_int = dict((note, number) for number, note in enumerate(pitchnames))
+    duration_to_int = dict((duration, number) for number, duration in enumerate(durations))
     tempo_to_int = dict((tempo, number) for number, tempo in enumerate(tempos))
 
-    int_to_note = {i: (note, duration, tempo) for i, (note, duration, tempo)
-                   in enumerate(product(pitchnames, durations, tempos))}
+    int_to_note = {i: (note, duration, tempo) for i, (note, duration, tempo) in enumerate(product(pitchnames, durations, tempos))}
 
     # Obtener el número total de combinaciones de notas, duraciones y tempos
     n_vocab = len(note_to_int) * len(duration_to_int) * len(tempo_to_int)
 
     # Preprocesar las notas, duraciones y tempos y crear las secuencias de entrada y salida para la red neuronal
-    network_input, network_output = prepare_sequences(
-        notes_durations, note_to_int, duration_to_int, tempo_to_int)
+    network_input, network_output = prepare_sequences(notes_durations, note_to_int, duration_to_int, tempo_to_int)
 
-    # Entrenar la red neuronal
-    epochs = 25  # Número de épocas que quieres entrenar
-    model = train(network_input, network_output,
-                  note_to_int, duration_to_int, epochs)
+    # Definir la longitud de la secuencia utilizada para entrenar la red
+    sequence_length = network_input.shape[1]
 
-    # Generar música utilizando el modelo
+    # Construcción y compilación del generador y discriminador para GAN
+    generator = build_generator()
+    discriminator = build_discriminator(sequence_length)
+    discriminator.compile(loss='binary_crossentropy', optimizer=Adam(lr=0.0002, beta_1=0.5))
+
+
+    # Construcción y compilación del GAN completo
+    gan_input = Input(shape=(100, 1))
+    gan_output = discriminator(generator(gan_input))
+    gan = Model(gan_input, gan_output)
+    gan.compile(loss='binary_crossentropy', optimizer=Adam(lr=0.0002, beta_1=0.5))
+
+    # Entrenamiento del GAN
+    train_gan(generator, discriminator, gan, network_input, network_output, epochs=50)
+
+
+    # Generar música utilizando el modelo GAN
+    # Nota: Necesitarás modificar la función generate_music para que utilice el generador del GAN
     prediction_output = generate_music(
-        model, network_input, int_to_note, n_vocab, duration_to_int, tempo_to_int)
+    model=generator,
+    network_input=network_input, 
+    int_to_note=int_to_note, 
+    n_vocab=n_vocab, 
+    duration_to_int=duration_to_int, 
+    tempo_to_int=tempo_to_int)
 
     # Crear música y exportarla a un archivo MIDI
     create_music(prediction_output)
